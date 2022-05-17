@@ -3,8 +3,7 @@ envs=(
     Breakout-v0
     MsPacman-v4
 )
-t = 2e6
 for i in "${envs[@]}"; do
-    python training.py "$i" $t
+    python training.py "$i" 200000
 done
 sleep 3
