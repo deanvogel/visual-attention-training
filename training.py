@@ -11,7 +11,7 @@ import gym
 if __name__ == "__main__":
     _, environment_name, timesteps = sys.argv
     img_size = 210
-    env = ResizeObservation(gym.make('environment_name'), img_size)
+    env = ResizeObservation(gym.make(environment_name), img_size)
     policy_kwargs = dict(
         features_extractor_class=VANFeatureExtractionWrapper,
         features_extractor_kwargs=dict(features_dim=256, model_f=van_based, img_size=img_size),
