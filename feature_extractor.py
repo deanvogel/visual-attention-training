@@ -1,10 +1,11 @@
 import torch
-import gym
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from torchvision.transforms import Resize
+import torch.nn as nn
 import numpy as np
+import gym
 import cv2
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gym import ObservationWrapper
+from models.attention_conv import SelfAttentionConv
 
 class ResizeObservation(ObservationWrapper):
     r"""Downsample the image observation to a square image."""
@@ -28,9 +29,9 @@ class ResizeObservation(ObservationWrapper):
             observation = np.expand_dims(observation, -1)
         return observation
 
-class VANFeatureExtractionWrapper(BaseFeaturesExtractor):
+class VANFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: gym.spaces.Box, features_dim=256, model_f=None, img_size=224, **kwargs):
-        super(VANFeatureExtractionWrapper, self).__init__(observation_space, features_dim)
+        super().__init__(observation_space, features_dim)
 
         in_chans = observation_space.shape[0]
 
@@ -40,3 +41,42 @@ class VANFeatureExtractionWrapper(BaseFeaturesExtractor):
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         # observations = self.transforms(observations)
         return self.model(observations)
+
+class AttentionalCNNFeatureExtractor(BaseFeaturesExtractor):
+    """
+    :param observation_space: (gym.Space)
+    :param features_dim: (int) Number of features extracted.
+        This corresponds to the number of unit for the last layer.
+    """
+
+    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 256):
+        super().__init__(observation_space, features_dim)
+        # We assume CxHxW images (channels first)
+        # Re-ordering will be done by pre-preprocessing or wrapper
+        n_input_channels = observation_space.shape[0]
+
+        self.cnn = nn.Sequential(
+            nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            SelfAttentionConv(32),
+            nn.ReLU(),
+            SelfAttentionConv(32),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+
+        # Compute shape by doing one forward pass
+        with torch.no_grad():
+            n_flatten = self.cnn(
+                torch.as_tensor(observation_space.sample()[None]).float()
+            ).shape[1]
+
+        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        # with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        x = self.cnn(observations)
+        x = self.linear(x)
+        # print(prof)
+
+        return x

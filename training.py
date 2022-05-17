@@ -1,58 +1,61 @@
-from van import van_based
-from feature_extractor import VANFeatureExtractionWrapper
+from feature_extractor import VANFeatureExtractor, AttentionalCNNFeatureExtractor
 from feature_extractor import ResizeObservation
+from models.visual_attention_network import van_based
 from stable_baselines3 import PPO
-# from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.torch_layers import NatureCNN
 from stable_baselines3.common.evaluation import evaluate_policy
-# from tqdm.auto import tqdm
-import sys
+from stable_baselines3.common.utils import set_random_seed
+from tqdm.auto import tqdm
+import argparse
 import gym
+# from procgen import ProcgenGym3Env
+# from stable_baselines3.common.vec_env import VecMonitor
 
 if __name__ == "__main__":
-    _, environment_name, timesteps = sys.argv
-    img_size = 210
-    env = ResizeObservation(gym.make(environment_name), img_size)
-    policy_kwargs = dict(
-        features_extractor_class=VANFeatureExtractionWrapper,
-        features_extractor_kwargs=dict(features_dim=256, model_f=van_based, img_size=img_size),
+    parser = argparse.ArgumentParser(description="Visual attention training")
+    parser.add_argument("--env", type=str)
+    parser.add_argument("--timesteps", type=int, default=2e6)
+    parser.add_argument("--attention", type=str, default="van")
+    parser.add_argument("--img_size", type=int, default=210)
+    parser.add_argument("--seed", type=int, default=42)
+
+    args = parser.parse_args()
+
+
+    feature_extractors = {
+        "cnn": dict(
+            features_extractor_class=NatureCNN,
+            features_extractor_kwargs=dict(features_dim=256),
+        ),
+        "acnn": dict(
+            features_extractor_class=AttentionalCNNFeatureExtractor,
+            features_extractor_kwargs=dict(features_dim=256),
+        ),
+        "van": dict(
+            features_extractor_class=VANFeatureExtractor,
+            features_extractor_kwargs=dict(
+                features_dim=256, model_f=van_based, img_size=args.img_size
+            ),
+        ),
+    }
+
+    env = ResizeObservation(gym.make(args.env), args.img_size)
+    # env = VecMonitor(venv=ProcgenGym3Env(num_envs=4, env_name=args.env))
+    policy_kwargs = feature_extractors[args.attention]
+
+    experiment = PPO(
+        "CnnPolicy",
+        env,
+        policy_kwargs=policy_kwargs,
+        verbose=1,
+        tensorboard_log=f"./{args.env}/{args.attention}",
     )
-    experiment = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, verbose=1, tensorboard_log="./van_ms_pacman/")
-    experiment.learn(int(timesteps))
-    env.reset()
-    avg_reward = evaluate_policy(experiment, env, n_eval_episodes=10)
-    print(avg_reward)
+    experiment.learn(int(args.timesteps))
+
+    # gc.collect()
+    # env.reset()
+
+    # avg_reward = evaluate_policy(experiment, env, n_eval_episodes=10)
+    # print(avg_reward)
     # save model to folder
-    experiment.save("/saved_models/" + "based_" + f"{environment_name}")
-
-
-# class TrainingCallback(BaseCallback):
-#     """
-#     :param pbar: (tqdm.pbar) Progress bar object
-#     """
-#     def __init__(self, pbar):
-#         super(TrainingCallback, self).__init__()
-#         self._pbar = pbar
-
-#     def _on_step(self):
-#         # Update the progress bar:
-#         self._pbar.n = self.num_timesteps
-#         self._pbar.update(0)
-
-#     # def _on_rollout_end(self) -> None:
-#     #     gc.collect()
-
-# # this callback uses the 'with' block, allowing for correct initialisation and destruction
-# class ProgressBarManager(object):
-#     def __init__(self, total_timesteps): # init object with total timesteps
-#         self.pbar = None
-#         self.total_timesteps = total_timesteps
-        
-#     def __enter__(self): # create the progress bar and callback, return the callback
-#         self.pbar = tqdm(total=self.total_timesteps)
-            
-#         return TrainingCallback(self.pbar)
-
-#     def __exit__(self, exc_type, exc_val, exc_tb): # close the callback
-#         self.pbar.n = self.total_timesteps
-#         self.pbar.update(0)
-#         self.pbar.close()
+    experiment.save(f"./saved_models/{args.env}/{args.attention}")
